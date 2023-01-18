@@ -2,6 +2,12 @@
 # 新しいバージョンを取得するには、SHA を更新する必要があります。
 # タグまたはブランチを参照することもできますが、アクションは警告なしに変更される可能性があります。
 
+# マニフェストファイル更新のPR作成先のリポジトリを持つアカウントでPersonal-AccessTokenを発行する
+# そのTokenをPR作成元のリポジトリのSetting > Secrets and variables > Actions > Repository secretsに設定しておく必要がある
+# Repository secretsに設定するNAMEは↓のPR作成する際に設定したTokenと一致している必要がある。REPO_GITHUB_TOKEN
+
+# https://docs.github.com/ja/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
+
 name: deploy-pr
 
 on:
@@ -13,10 +19,13 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
-# https://docs.github.com/ja/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions
 jobs:
   build-and-push-image:
     runs-on: ubuntu-latest
+    # このjobのアウトプットとしてタグを設定
+    # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idoutputs
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
     permissions:
       contents: read
       packages: write
@@ -45,3 +54,32 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+  update-manifest:
+    # ↑のbuild-and-push-imageが終わったら実行
+    needs: build-and-push-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout jpdel518/k8s-study # https://github.com/jpdel518/k8s-study/blob/main/mysql-app/sample-app-deployment.yaml
+        uses: actions/checkout@v3 # 対象リポジトリのコードを持ってくる
+        with:
+          repository: jpdel518/k8s-study # リポジトリ指定
+          ref: main # ブランチ指定
+      - name: Update minifest file
+        env: # 環境変数を設定できる
+          YAML_PATH: /mysql-app/sample-app-deployment.yaml
+          CONTAINER_NAME: fastapi-sample
+          IMAGE_FULL_NAME: ${{ needs.build-and-push-image.outputs.tags }} # pull-requests -> ghcr:io/jpdel518/fastapi-sample:pr-{pull-request-num}
+        # spec.template.spec.containerの中からnameが${CONTAINER_NAME}のものをselectしてimageを${IMAGE_FULL_NAME}に変更する。最後にyqコマンドに${YAML_PATH}を渡す
+        run: |
+          yq e -l "(.spec.template.spec.containers[]|select(.name == \"${CONTAINER_NAME}\").image)|=\"${IMAGE_FULL_NAME}\"" ${YAML_PATH}
+          cat ${YAML_PATH}
+      - name: Create PR
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.REPO_GITHUB_TOKEN }} # 別のリポジトリにpushするのでtokenが必要
+          title: "Update fastapi-sample" # pull requestのタイトル
+          base: main # 対象のブランチ
+          draft: true # ドラフトとしてpull requestを作成する
+          body: |
+            # Changes
+            - Update `fastapi-sample` image
