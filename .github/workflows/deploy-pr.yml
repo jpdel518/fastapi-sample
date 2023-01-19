@@ -66,12 +66,12 @@ jobs:
           ref: main # ブランチ指定
       - name: Update minifest file
         env: # 環境変数を設定できる
-          YAML_PATH: /mysql-app/sample-app-deployment.yaml
+          YAML_PATH: mysql-app/sample-app-deployment.yaml
           CONTAINER_NAME: fastapi-sample
           IMAGE_FULL_NAME: ${{ needs.build-and-push-image.outputs.tags }} # pull-requests -> ghcr:io/jpdel518/fastapi-sample:pr-{pull-request-num}
         # spec.template.spec.containerの中からnameが${CONTAINER_NAME}のものをselectしてimageを${IMAGE_FULL_NAME}に変更する。最後にyqコマンドに${YAML_PATH}を渡す
         run: |
-          yq e -l "(.spec.template.spec.containers[]|select(.name == \"${CONTAINER_NAME}\").image)|=\"${IMAGE_FULL_NAME}\"" ${YAML_PATH}
+          yq e -i "(.spec.template.spec.containers[]|select(.name == \"${CONTAINER_NAME}\").image)|=\"${IMAGE_FULL_NAME}\"" ${YAML_PATH}
           cat ${YAML_PATH}
       - name: Create PR
         uses: peter-evans/create-pull-request@v4
